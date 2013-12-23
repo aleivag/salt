@@ -3,7 +3,8 @@
 The Salt Key backend API and interface used by the CLI. The Key class can be
 used to manage salt keys directly without interfacing with the CLI.
 
-i will add mysqlsuport
+i will add sql backend to key-suport, first it will be in pararalel of key, and then it will be
+as a standalone option
 
 '''
 
@@ -18,6 +19,9 @@ import salt.utils
 import salt.utils.event
 from salt.utils.event import tagify
 
+#this options are for sql suport.
+from sqlalchemy import create_engine
+from sqlalchemy import Table, MetaData
 
 class KeyCLI(object):
     '''
@@ -316,6 +320,14 @@ class Key(object):
     def __init__(self, opts):
         self.opts = opts
         self.event = salt.utils.event.MasterEvent(opts['sock_dir'])
+        
+        #sql backend
+        
+        self.engine = create_engine(opts['pki_backend'], echo = True)
+        self.minion_table = 
+        print self.engine
+        
+        
 
     def _check_minions_directories(self):
         '''
