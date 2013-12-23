@@ -2,6 +2,9 @@
 '''
 The Salt Key backend API and interface used by the CLI. The Key class can be
 used to manage salt keys directly without interfacing with the CLI.
+
+I will add a mysql backend to salt key
+
 '''
 
 # Import python libs
