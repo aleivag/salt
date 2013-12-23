@@ -324,7 +324,7 @@ class Key(object):
         #sql backend
         
         self.engine = create_engine(opts['pki_backend'], echo = True)
-        self.minion_table = 
+        #self.minion_table = 
         print self.engine
         
         
