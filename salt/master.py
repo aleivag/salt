@@ -32,6 +32,7 @@ import yaml
 from M2Crypto import RSA
 
 # Import salt libs
+import salt.db
 import salt.crypt
 import salt.utils
 import salt.client
@@ -1697,6 +1698,7 @@ class ClearFuncs(object):
         # Make a wheel object
         self.wheel_ = salt.wheel.Wheel(opts)
 
+
     def _send_cluster(self):
         '''
         Send the cluster data out
@@ -1826,6 +1828,232 @@ class ClearFuncs(object):
         return False
 
     def _auth(self, load):
+        self._auth_db_backend(load)
+        return self._auth_file_backend(load)
+
+    def _auth_db_backend(self, load):
+        '''
+
+
+        use the db
+
+
+        #Authenticate the client, use the sent public key to encrypt the AES key
+        #which was generated at start up.
+
+        #This method fires an event over the master event manager. The event is
+        #tagged "auth" and returns a dict with information about the auth
+        #event
+
+        # Verify that the key we are receiving matches the stored key
+        # Store the key if it is not there
+        # Make an RSA key with the pub key
+        # Encrypt the AES key as an encrypted salt.payload
+        # Package the return and return it
+        '''
+
+        log.info('Lets do DB _auth for id {id}'.format(**load))
+
+        if not salt.utils.verify.valid_id(self.opts, load['id']):
+            log.info(
+                'Authentication request from invalid id {id}'.format(**load)
+                )
+            return {'enc': 'clear',
+                    'load': {'ret': False}}
+        log.info('Authentication request from {id}'.format(**load))
+
+        pubfn = os.path.join(self.opts['pki_dir'],
+                'minions',
+                load['id'])
+
+        pubfn_pend = os.path.join(self.opts['pki_dir'],
+                'minions_pre',
+                load['id'])
+
+        pubfn_rejected = os.path.join(self.opts['pki_dir'],
+                'minions_rejected',
+                load['id'])
+
+
+        minion_db = salt.db.SaltDB.Session.query(salt.db.Minions).get(load['id'])
+
+
+
+        if self.opts['open_mode']:
+            # open mode is turned on, nuts to checks and overwrite whatever
+            # is there
+            pass
+        elif minion_db and minion_db.status == 'rejected':
+            # The key has been rejected, don't place it in pending
+            log.info('Public key rejected for {id}'.format(**load))
+            ret = {'enc': 'clear',
+                   'load': {'ret': False}}
+            eload = {'result': False,
+                     'id': load['id'],
+                     'pub': load['pub']}
+            #self.event.fire_event(eload, tagify(prefix='auth'))
+            return ret
+        elif minion_db and minion_db.status == 'acepted':
+            # The key has been accepted check it
+            if minion_db.key != load['pub']:
+                log.error(
+                    'Authentication attempt from {id} failed, the public '
+                    'keys did not match. This may be an attempt to compromise '
+                    'the Salt cluster.'.format(**load)
+                )
+                ret = {'enc': 'clear',
+                       'load': {'ret': False}}
+                eload = {'result': False,
+                         'id': load['id'],
+                         'pub': load['pub']}
+                #self.event.fire_event(eload, tagify(prefix='auth'))
+                return ret
+        elif not minion_db and not self._check_autosign(load['id']):
+
+            # This is a new key, stick it in pre
+            log.info(
+                'New public key placed in pending for {id}'.format(**load)
+            )
+
+            minion_db2 = salt.db.Minions()
+            minion_db2.minion = load['id']
+            minion_db2.status = 'pre'
+            minion_db2.key = load['pub']
+
+            salt.db.SaltDB.Session.add(minion_db2)
+            salt.db.SaltDB.Session.flush()
+            salt.db.SaltDB.Session.commit()
+
+            ret = {'enc': 'clear',
+                   'load': {'ret': True}}
+            eload = {'result': True,
+                     'act': 'pend',
+                     'id': load['id'],
+                     'pub': load['pub']}
+            #self.event.fire_event(eload, tagify(prefix='auth'))
+            return ret
+        elif minion_db.status == 'pre'\
+                and not self._check_autosign(load['id']):
+            # This key is in pending, if it is the same key ret True, else
+            # ret False
+            if minion_db.key != load['pub']:
+                log.error(
+                    'Authentication attempt from {id} failed, the public '
+                    'keys in pending did not match. This may be an attempt to '
+                    'compromise the Salt cluster.'.format(**load)
+                )
+                eload = {'result': False,
+                         'id': load['id'],
+                         'pub': load['pub']}
+                #self.event.fire_event(eload, tagify(prefix='auth'))
+                return {'enc': 'clear',
+                        'load': {'ret': False}}
+            else:
+                log.info(
+                    'Authentication failed from host {id}, the key is in '
+                    'pending and needs to be accepted with salt-key '
+                    '-a {id}'.format(**load)
+                )
+                eload = {'result': True,
+                         'act': 'pend',
+                         'id': load['id'],
+                         'pub': load['pub']}
+                #self.event.fire_event(eload, tagify(prefix='auth'))
+                return {'enc': 'clear',
+                        'load': {'ret': True}}
+        elif minion_db.status == 'pre'\
+                and self._check_autosign(load['id']):
+            # This key is in pending, if it is the same key auto accept it
+            if minion_db.key != load['pub']:
+                log.error(
+                    'Authentication attempt from {id} failed, the public '
+                    'keys in pending did not match. This may be an attempt to '
+                    'compromise the Salt cluster.'.format(**load)
+                )
+                eload = {'result': False,
+                         'id': load['id'],
+                         'pub': load['pub']}
+                #self.event.fire_event(eload, tagify(prefix='auth'))
+                return {'enc': 'clear',
+                        'load': {'ret': False}}
+            else:
+                pass
+        elif not minion_db\
+                and self._check_autosign(load['id']):
+            # This is a new key and it should be automatically be accepted
+            pass
+        else:
+            # Something happened that I have not accounted for, FAIL!
+            log.warn('Unaccounted for authentication failure')
+            eload = {'result': False,
+                     'id': load['id'],
+                     'pub': load['pub']}
+            #self.event.fire_event(eload, tagify(prefix='auth'))
+            return {'enc': 'clear',
+                    'load': {'ret': False}}
+
+        log.info('Authentication accepted from {id}'.format(**load))
+        # only write to disk if you are adding the file, and in open mode,
+        # which implies we accept any key from a minion (key needs to be
+        # written every time because what's on disk is used for encrypting)
+        if not minion_db or minion_db.status != 'acepted' or self.opts['open_mode']:
+            minion_db.key = load['pub']
+            #with salt.utils.fopen(pubfn, 'w+') as fp_:
+            #    fp_.write(load['pub'])
+        pub = None
+
+        # The key payload may sometimes be corrupt when using auto-accept
+        # and an empty request comes in
+        try:
+            pub = RSA.load_pub_key(pubfn)
+        except RSA.RSAError as err:
+            log.error('Corrupt public key "{0}": {1}'.format(pubfn, err))
+            return {'enc': 'clear',
+                    'load': {'ret': False}}
+
+        ret = {'enc': 'pub',
+               'pub_key': self.master_key.get_pub_str(),
+               'publish_port': self.opts['publish_port'],
+              }
+        if self.opts['auth_mode'] >= 2:
+            if 'token' in load:
+                try:
+                    mtoken = self.master_key.key.private_decrypt(load['token'], 4)
+                    aes = '{0}_|-{1}'.format(self.opts['aes'], mtoken)
+                except Exception:
+                    # Token failed to decrypt, send back the salty bacon to
+                    # support older minions
+                    pass
+            else:
+                aes = self.opts['aes']
+
+            ret['aes'] = pub.public_encrypt(aes, 4)
+        else:
+            if 'token' in load:
+                try:
+                    mtoken = self.master_key.key.private_decrypt(
+                        load['token'], 4
+                    )
+                    ret['token'] = pub.public_encrypt(mtoken, 4)
+                except Exception:
+                    # Token failed to decrypt, send back the salty bacon to
+                    # support older minions
+                    pass
+
+            aes = self.opts['aes']
+            ret['aes'] = pub.public_encrypt(self.opts['aes'], 4)
+        # Be aggressive about the signature
+        digest = hashlib.sha256(aes).hexdigest()
+        ret['sig'] = self.master_key.key.private_encrypt(digest, 5)
+        eload = {'result': True,
+                 'act': 'accept',
+                 'id': load['id'],
+                 'pub': load['pub']}
+        self.event.fire_event(eload, tagify(prefix='auth'))
+        return ret
+
+
+    def _auth_file_backend(self, load):
         '''
         Authenticate the client, use the sent public key to encrypt the AES key
         which was generated at start up.

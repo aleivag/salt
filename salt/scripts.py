@@ -10,6 +10,7 @@ import sys
 # Import salt libs
 import salt
 import salt.cli
+import salt.db
 try:
     import salt.cloud.cli
 except ImportError:
@@ -21,6 +22,9 @@ def salt_master():
     '''
     Start the salt-master.
     '''
+    db = salt.db.SaltDB()
+    db.create_database()
+
     master = salt.Master()
     master.start()
 

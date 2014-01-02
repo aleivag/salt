@@ -324,10 +324,7 @@ class Key(object):
         #sql backend
         
         self.engine = create_engine(opts['pki_backend'], echo = True)
-        #self.minion_table = 
-        print self.engine
-        
-        
+        self.pki_table = Table(opts['pki_sql_keytable'], MetaData(self.engine), autoload=True)
 
     def _check_minions_directories(self):
         '''
@@ -493,9 +490,23 @@ class Key(object):
         keydirs = ['minions_pre']
         if include_rejected:
             keydirs.append('minions_rejected')
+        
         for keydir in keydirs:
             for key in matches.get(keydir, []):
-                try:
+                try:            
+                    print os.path.join(self.opts['pki_dir'], keydir, key), "==>", os.path.join(
+                                self.opts['pki_dir'],
+                                'minions',
+                                key)
+                     
+                    #print "UPDATE %s set status='minion' WHERE minion '%s') " % (self.opts['pki_sql_keytable'], key)
+                    print self.pki_table.update().where(
+                        self.pki_table.c.minion == key 
+                    ).values(status = 'acepted').values(key = self.key_str(key).get('minions_pre', {}).get(key, None))
+                    
+                    
+                    1/0
+                
                     shutil.move(
                             os.path.join(
                                 self.opts['pki_dir'],
@@ -510,6 +521,9 @@ class Key(object):
                              'act': 'accept',
                              'id': key}
                     self.event.fire_event(eload, tagify(prefix='key'))
+                
+                
+                
                 except (IOError, OSError):
                     pass
         return (
