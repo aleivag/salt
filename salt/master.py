@@ -1828,15 +1828,20 @@ class ClearFuncs(object):
         return False
 
     def _auth(self, load):
-        self._auth_db_backend(load)
-        return self._auth_file_backend(load)
+        ret, eload = self._auth_db_backend(load)
+        ret, eload = self._auth_file_backend(load)
+
+        if eload is not None:
+            self.event.fire_event(eload, tagify(prefix='auth'))
+        return ret
 
     def _auth_db_backend(self, load):
         '''
 
+        This function is he same that the old _auth, witch i've remane to '_auth_file_backend'
+        the only diference it's that it use a DB Backend and not a /etc/salt/pki backend
 
-        use the db
-
+        this is wat it does:
 
         #Authenticate the client, use the sent public key to encrypt the AES key
         #which was generated at start up.
@@ -1859,24 +1864,16 @@ class ClearFuncs(object):
                 'Authentication request from invalid id {id}'.format(**load)
                 )
             return {'enc': 'clear',
-                    'load': {'ret': False}}
+                    'load': {'ret': False}}, None
+
         log.info('Authentication request from {id}'.format(**load))
 
-        pubfn = os.path.join(self.opts['pki_dir'],
-                'minions',
-                load['id'])
-
-        pubfn_pend = os.path.join(self.opts['pki_dir'],
-                'minions_pre',
-                load['id'])
-
-        pubfn_rejected = os.path.join(self.opts['pki_dir'],
-                'minions_rejected',
-                load['id'])
+        #pubfn
+        #pubfn_pend
+        #pubfn_rejected
 
 
         minion_db = salt.db.SaltDB.Session.query(salt.db.Minions).get(load['id'])
-
 
 
         if self.opts['open_mode']:
@@ -1891,8 +1888,7 @@ class ClearFuncs(object):
             eload = {'result': False,
                      'id': load['id'],
                      'pub': load['pub']}
-            #self.event.fire_event(eload, tagify(prefix='auth'))
-            return ret
+            return ret, eload
         elif minion_db and minion_db.status == 'acepted':
             # The key has been accepted check it
             if minion_db.key != load['pub']:
@@ -1906,8 +1902,7 @@ class ClearFuncs(object):
                 eload = {'result': False,
                          'id': load['id'],
                          'pub': load['pub']}
-                #self.event.fire_event(eload, tagify(prefix='auth'))
-                return ret
+                return ret, eload
         elif not minion_db and not self._check_autosign(load['id']):
 
             # This is a new key, stick it in pre
@@ -1930,12 +1925,14 @@ class ClearFuncs(object):
                      'act': 'pend',
                      'id': load['id'],
                      'pub': load['pub']}
-            #self.event.fire_event(eload, tagify(prefix='auth'))
-            return ret
-        elif minion_db.status == 'pre'\
+
+            return ret, eload
+        elif minion_db and minion_db.status == 'pre'\
                 and not self._check_autosign(load['id']):
+
             # This key is in pending, if it is the same key ret True, else
             # ret False
+
             if minion_db.key != load['pub']:
                 log.error(
                     'Authentication attempt from {id} failed, the public '
@@ -1945,9 +1942,9 @@ class ClearFuncs(object):
                 eload = {'result': False,
                          'id': load['id'],
                          'pub': load['pub']}
-                #self.event.fire_event(eload, tagify(prefix='auth'))
-                return {'enc': 'clear',
+                ret = {'enc': 'clear',
                         'load': {'ret': False}}
+                return ret, eload
             else:
                 log.info(
                     'Authentication failed from host {id}, the key is in '
@@ -1958,9 +1955,10 @@ class ClearFuncs(object):
                          'act': 'pend',
                          'id': load['id'],
                          'pub': load['pub']}
-                #self.event.fire_event(eload, tagify(prefix='auth'))
-                return {'enc': 'clear',
+
+                ret = {'enc': 'clear',
                         'load': {'ret': True}}
+                return ret, eload
         elif minion_db.status == 'pre'\
                 and self._check_autosign(load['id']):
             # This key is in pending, if it is the same key auto accept it
@@ -1974,8 +1972,9 @@ class ClearFuncs(object):
                          'id': load['id'],
                          'pub': load['pub']}
                 #self.event.fire_event(eload, tagify(prefix='auth'))
-                return {'enc': 'clear',
+                ret = {'enc': 'clear',
                         'load': {'ret': False}}
+                return ret, eload
             else:
                 pass
         elif not minion_db\
@@ -1988,9 +1987,13 @@ class ClearFuncs(object):
             eload = {'result': False,
                      'id': load['id'],
                      'pub': load['pub']}
-            #self.event.fire_event(eload, tagify(prefix='auth'))
-            return {'enc': 'clear',
+            ret = {'enc': 'clear',
                     'load': {'ret': False}}
+            return ret, eload
+
+
+
+        ###############
 
         log.info('Authentication accepted from {id}'.format(**load))
         # only write to disk if you are adding the file, and in open mode,
