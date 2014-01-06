@@ -26,10 +26,12 @@ import subprocess
 import multiprocessing
 import sys
 
+from cStringIO import StringIO
+
 # Import third party libs
 import zmq
 import yaml
-from M2Crypto import RSA
+from M2Crypto import RSA, BIO
 
 # Import salt libs
 import salt.db
@@ -1829,11 +1831,15 @@ class ClearFuncs(object):
 
     def _auth(self, load):
         ret, eload = self._auth_db_backend(load)
-        ret, eload = self._auth_file_backend(load)
 
-        if eload is not None:
-            self.event.fire_event(eload, tagify(prefix='auth'))
-        return ret
+        # meanwile the _auth_file_backend does not return ret and eload
+        # we will retun it as is
+        return self._auth_file_backend(load)
+
+        #ret, eload = self._auth_file_backend(load)
+        #if eload is not None:
+        #    self.event.fire_event(eload, tagify(prefix='auth'))
+        #return ret
 
     def _auth_db_backend(self, load):
         '''
@@ -1867,11 +1873,6 @@ class ClearFuncs(object):
                     'load': {'ret': False}}, None
 
         log.info('Authentication request from {id}'.format(**load))
-
-        #pubfn
-        #pubfn_pend
-        #pubfn_rejected
-
 
         minion_db = salt.db.SaltDB.Session.query(salt.db.Minions).get(load['id'])
 
@@ -1971,7 +1972,7 @@ class ClearFuncs(object):
                 eload = {'result': False,
                          'id': load['id'],
                          'pub': load['pub']}
-                #self.event.fire_event(eload, tagify(prefix='auth'))
+
                 ret = {'enc': 'clear',
                         'load': {'ret': False}}
                 return ret, eload
@@ -2008,11 +2009,16 @@ class ClearFuncs(object):
         # The key payload may sometimes be corrupt when using auto-accept
         # and an empty request comes in
         try:
-            pub = RSA.load_pub_key(pubfn)
+
+            #here we are going to do something equivalent to
+            #      pub = RSA.load_pub_key(pubfn)
+            # but manualy
+            pub = RSA.load_key_bio(BIO.File(StringIO(minion_db.key)))
+
         except RSA.RSAError as err:
-            log.error('Corrupt public key "{0}": {1}'.format(pubfn, err))
+            log.error('Corrupt public key "DB://{0}": {1}'.format(minion_db.minion, err))
             return {'enc': 'clear',
-                    'load': {'ret': False}}
+                    'load': {'ret': False}}, None
 
         ret = {'enc': 'pub',
                'pub_key': self.master_key.get_pub_str(),
@@ -2052,8 +2058,8 @@ class ClearFuncs(object):
                  'act': 'accept',
                  'id': load['id'],
                  'pub': load['pub']}
-        self.event.fire_event(eload, tagify(prefix='auth'))
-        return ret
+        #self.event.fire_event(eload, tagify(prefix='auth'))
+        return ret, eload
 
 
     def _auth_file_backend(self, load):
